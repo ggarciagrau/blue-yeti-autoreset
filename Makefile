@@ -13,7 +13,7 @@ CFLAGS ?= -O2
 CFLAGS += -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wformat=2 -Werror
 LDLIBS += $(shell $(PKG_CONFIG) --libs libusb-1.0)
 
-.PHONY: all check clean install
+.PHONY: all check clean install uninstall
 
 all: build/blue-yeti-reset
 
@@ -47,6 +47,15 @@ install: build/blue-yeti-reset
 		"$(DESTDIR)$(systemdunitdir)/blue-yeti-autoreset-resume.service"
 	$(INSTALL) -D -m 0644 README.md "$(DESTDIR)$(docdir)/README.md"
 	$(INSTALL) -D -m 0644 LICENSE "$(DESTDIR)$(licensedir)/LICENSE"
+
+uninstall:
+	rm -f "$(DESTDIR)$(bindir)/blue-yeti-reset"
+	rm -f "$(DESTDIR)$(libexecdir)/blue-yeti-autoreset"
+	rm -f "$(DESTDIR)$(systemdunitdir)/blue-yeti-autoreset.service"
+	rm -f "$(DESTDIR)$(systemdunitdir)/blue-yeti-autoreset-resume.service"
+	rm -f "$(DESTDIR)$(docdir)/README.md"
+	rm -f "$(DESTDIR)$(licensedir)/LICENSE"
+	-rmdir "$(DESTDIR)$(libexecdir)" "$(DESTDIR)$(docdir)" "$(DESTDIR)$(licensedir)" 2>/dev/null
 
 clean:
 	rm -rf build

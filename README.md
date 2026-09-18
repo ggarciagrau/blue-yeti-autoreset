@@ -55,6 +55,11 @@ sudo systemctl enable --now blue-yeti-autoreset.service
 sudo systemctl enable blue-yeti-autoreset-resume.service
 ```
 
+`make install` respects `DESTDIR` for staged/packaged builds (e.g.
+`make DESTDIR=/tmp/pkgroot install`). Build-time dependencies (make, libusb,
+pkgconf, a C17 compiler, systemd, and POSIX `sh`) are listed again under
+[Build and test](#build-and-test).
+
 The installation provides two systemd services that must each be enabled once:
 
 - `blue-yeti-autoreset.service` runs once during each boot after initial udev
@@ -73,6 +78,28 @@ resetting an already connected microphone immediately:
 ```sh
 sudo systemctl enable blue-yeti-autoreset.service blue-yeti-autoreset-resume.service
 ```
+
+## Uninstall
+
+Disable and stop both services, then remove the AUR package:
+
+```sh
+sudo systemctl disable --now blue-yeti-autoreset.service blue-yeti-autoreset-resume.service
+sudo pacman -R blue-yeti-autoreset
+```
+
+For development installs, remove the installed files from this checkout
+instead:
+
+```sh
+sudo systemctl disable --now blue-yeti-autoreset.service blue-yeti-autoreset-resume.service
+sudo make uninstall
+sudo systemctl daemon-reload
+```
+
+`make uninstall` removes `blue-yeti-reset`, the `blue-yeti-autoreset` wrapper,
+both systemd unit files, and the installed README/LICENSE copies, using the
+same `DESTDIR` (if any) that was passed to `make install`.
 
 ## How it works
 
