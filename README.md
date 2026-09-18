@@ -52,26 +52,39 @@ make check
 sudo make install
 sudo systemctl daemon-reload
 sudo systemctl enable --now blue-yeti-autoreset.service
+sudo systemctl enable blue-yeti-autoreset-resume.service
 ```
 
-The installation provides a systemd service that must be enabled once. It runs
-once during each boot after initial udev device processing has settled. USB
-reconnections later in the same boot do not trigger another automatic reset.
+The installation provides two systemd services that must each be enabled once:
 
-To enable automatic recovery starting with the next boot without resetting an
-already connected microphone immediately:
+- `blue-yeti-autoreset.service` runs once during each boot after initial udev
+  device processing has settled. USB reconnections later in the same boot do
+  not trigger another automatic reset.
+- `blue-yeti-autoreset-resume.service` runs once after the system resumes from
+  suspend, hibernate, hybrid-sleep, or suspend-then-hibernate, since the same
+  fault reappears whenever the microphone stays powered across one of those
+  transitions. It is a separate unit, ordered `After=` the corresponding sleep
+  targets and pulled in by `WantedBy=` those same targets, so systemd starts it
+  every time the machine wakes rather than only once per boot.
+
+To enable automatic recovery starting with the next boot/resume without
+resetting an already connected microphone immediately:
 
 ```sh
-sudo systemctl enable blue-yeti-autoreset.service
+sudo systemctl enable blue-yeti-autoreset.service blue-yeti-autoreset-resume.service
 ```
 
 ## How it works
 
 1. `blue-yeti-autoreset.service` starts once during boot after initial udev
-   processing has settled.
-2. The wrapper scans sysfs for every device with the supported VID, PID,
-   firmware version, and a non-empty serial, then invokes `blue-yeti-reset` for
-   each serial.
+   processing has settled. `blue-yeti-autoreset-resume.service` starts once
+   after every return from suspend, hibernate, hybrid-sleep, or
+   suspend-then-hibernate, because the microphone stays powered across those
+   transitions the same way it does across a warm boot and can end up in the
+   same stuck state.
+2. Either unit's wrapper scans sysfs for every device with the supported VID,
+   PID, firmware version, and a non-empty serial, then invokes
+   `blue-yeti-reset` for each serial.
 3. The binary verifies VID, PID, firmware version, and serial, temporarily
    detaches AudioControl interface 0, and claims it through libusb.
 4. It sends one fixed extension-unit `SET_CUR` request:
@@ -85,9 +98,11 @@ wLength       = 8
 payload       = 00 09 00 00 00 00 00 00
 ```
 
-5. The firmware resets and the microphone re-enumerates. No hotplug rule starts
-   the service again, and `RemainAfterExit` keeps the successful service active
-   for the rest of the boot.
+5. The firmware resets and the microphone re-enumerates. No hotplug rule
+   starts either service again mid-boot or mid-session; `RemainAfterExit`
+   keeps `blue-yeti-autoreset.service` active for the rest of the boot, and
+   `blue-yeti-autoreset-resume.service` simply goes back to `inactive` until
+   the next sleep/resume cycle pulls it in again.
 
 ## Manual recovery
 
@@ -106,6 +121,15 @@ sudo blue-yeti-reset --execute-reset --serial SERIAL
 
 There is no option to select another opcode or supply an arbitrary payload.
 
+Manual recovery is a fallback, not the recommended fix for suspend/hibernate:
+enable `blue-yeti-autoreset-resume.service` (see Install) so the reset runs
+automatically on every wake instead. If a manual reset is run while an
+application still holds the microphone open for capture, the interface
+detach/reattach can race with that application and leave the device
+unresponsive until it is physically unplugged and reconnected; close any app
+that has the Yeti open for recording before running `blue-yeti-reset` by
+hand.
+
 ## Logs
 
 Inspect the service state and this boot's recovery logs:
@@ -113,6 +137,14 @@ Inspect the service state and this boot's recovery logs:
 ```sh
 systemctl status blue-yeti-autoreset.service
 journalctl -b -u blue-yeti-autoreset.service
+```
+
+Recovery logs from suspend/hibernate resumes are under the resume unit, still
+within the current boot's journal:
+
+```sh
+systemctl status blue-yeti-autoreset-resume.service
+journalctl -b -u blue-yeti-autoreset-resume.service
 ```
 
 ## Build and test
@@ -131,9 +163,10 @@ sends a live USB request.
 
 ## Limitations
 
-- Recovery is proactive once at boot; it does not react to later USB
-  reconnections, continuously sample audio, or diagnose unrelated capture
-  failures.
+- Recovery is proactive once at boot and once per suspend/hibernate resume
+  (when `blue-yeti-autoreset-resume.service` is enabled); it does not react to
+  later USB reconnections within an otherwise-awake session, continuously
+  sample audio, or diagnose unrelated capture failures.
 - A reset briefly removes and recreates the ALSA and PipeWire devices.
 - Firmware versions other than `0.20` are intentionally rejected because their
   reset handlers have not been verified.
