@@ -27,7 +27,13 @@ check: build/blue-yeti-reset
 	./build/blue-yeti-reset >/dev/null
 	sh -n scripts/blue-yeti-autoreset tests/check-autoreset.sh
 	sh ./tests/check-autoreset.sh
-	systemd-analyze verify systemd/blue-yeti-autoreset.service
+	# Verify the installed layout without requiring a host installation.
+	+@set -eu; \
+	check_root=$$(mktemp -d); \
+	trap 'rm -r -- "$$check_root"' EXIT HUP INT TERM; \
+	$(MAKE) DESTDIR="$$check_root" install; \
+	systemd-analyze verify --root="$$check_root" --recursive-errors=no \
+		"$(systemdunitdir)/blue-yeti-autoreset.service"
 
 install: build/blue-yeti-reset
 	$(INSTALL) -D -m 0755 build/blue-yeti-reset \
