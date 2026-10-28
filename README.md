@@ -13,7 +13,7 @@ The traditional workaround is to physically unplug and reconnect the Yeti, or
 otherwise remove USB power long enough to give it a complete power cycle. That
 works because the microphone performs its full cold-start initialization when
 power returns. This utility provides the equivalent recovery automatically,
-without requiring access to the cable after every affected boot.
+without requiring access to the cable after affected boots or system resumes.
 
 The utility automatically recovers the microphone by sending the same volatile
 ROM-reset command used by the official control software. The command resets the
@@ -28,9 +28,10 @@ writing persistent settings.
 - USB Audio Class: UAC1
 - Known affected production era: 2020-2023
 
-At boot, the service accepts any serial number for that exact device and
-firmware. It reads each matching serial from sysfs, and the reset binary checks
-the device identity and serial again before the request is sent.
+At boot and after system resume, the services accept any serial number for that
+exact device and firmware. They read each matching serial from sysfs, and the
+reset binary checks the device identity and serial again before the request is
+sent.
 
 This utility is intended for 2020-2023-era Blue Yeti Classic CR units using this
 hardware and firmware. Blue reused the Yeti name across revisions, so the year
@@ -71,6 +72,10 @@ The installation provides two systemd services that must each be enabled once:
   transitions. It is a separate unit, ordered `After=` the corresponding sleep
   targets and pulled in by `WantedBy=` those same targets, so systemd starts it
   every time the machine wakes rather than only once per boot.
+
+After upgrading from a version that only reset at boot, enable
+`blue-yeti-autoreset-resume.service` as well; upgrades do not enable it
+automatically.
 
 To enable automatic recovery starting with the next boot/resume without
 resetting an already connected microphone immediately:
@@ -185,8 +190,8 @@ make check
 ```
 
 `make check` builds with strict warnings, verifies plan-only mode, checks shell
-syntax and boot-time device discovery, and validates the systemd unit. It never
-sends a live USB request.
+syntax and automatic device discovery, and validates both systemd units. It
+never sends a live USB request.
 
 ## Limitations
 
