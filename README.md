@@ -155,12 +155,8 @@ There is no option to select another opcode or supply an arbitrary payload.
 
 Manual recovery is a fallback, not the recommended fix for suspend/hibernate:
 enable `blue-yeti-autoreset-resume.service` (see Install) so the reset runs
-automatically on every wake instead. If a manual reset is run while an
-application still holds the microphone open for capture, the interface
-detach/reattach can race with that application and leave the device
-unresponsive until it is physically unplugged and reconnected; close any app
-that has the Yeti open for recording before running `blue-yeti-reset` by
-hand.
+automatically on every wake instead. Applications can keep recording while a
+reset runs; see [Limitations](#limitations) for how they react.
 
 ## Logs
 
@@ -199,7 +195,11 @@ never sends a live USB request.
   (when `blue-yeti-autoreset-resume.service` is enabled); it does not react to
   later USB reconnections within an otherwise-awake session, continuously
   sample audio, or diagnose unrelated capture failures.
-- A reset briefly removes and recreates the ALSA and PipeWire devices.
+- A reset briefly removes and recreates the ALSA and PipeWire devices, the same
+  as unplugging the microphone. PipeWire re-adds it about three seconds later,
+  and clients that follow it, such as EasyEffects, resume capture on their own.
+  Applications that open the ALSA device directly see it disappear and must
+  reopen it. The microphone does not need to be unplugged afterwards.
 - Firmware versions other than `0.20` are intentionally rejected because their
   reset handlers have not been verified.
 - Automatic recovery requires systemd.
