@@ -38,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            debhelper libusb-1.0-0-dev pkgconf python3 systemd systemd-dev udev lintian
+            build-essential debhelper libusb-1.0-0-dev pkgconf python3 systemd systemd-dev udev lintian
           # Fails if the list above has drifted from debian/control.
           dpkg-checkbuilddeps
 
