@@ -1,0 +1,13 @@
+[Unit]
+Description=Reconnect OBS microphone inputs when the Blue Yeti reappears
+Documentation=file:/usr/share/doc/blue-yeti-autoreset/README.md
+After=pipewire-pulse.service
+Wants=pipewire-pulse.service
+
+[Service]
+ExecStart=/usr/bin/blue-yeti-obs-reconnect
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

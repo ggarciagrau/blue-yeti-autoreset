@@ -1,0 +1,3 @@
+# Reset an affected Blue Yeti (046d:0ab7, firmware 0.20) whenever it is plugged
+# in, including the coldplug events for a microphone already connected at boot.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="046d", ATTR{idProduct}=="0ab7", ATTR{bcdDevice}=="0020", TAG+="systemd", ENV{SYSTEMD_WANTS}+="blue-yeti-autoreset-hotplug.service"

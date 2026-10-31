@@ -1,0 +1,30 @@
+Source: blue-yeti-autoreset
+Section: sound
+Priority: optional
+Maintainer: Gerard Garcia Grau <gerardgarciagrau2@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               libusb-1.0-0-dev,
+               pkgconf,
+               python3,
+               systemd,
+               systemd-dev,
+               udev
+Standards-Version: 4.6.2
+Homepage: https://github.com/ggarciagrau/blue-yeti-autoreset
+Vcs-Browser: https://github.com/ggarciagrau/blue-yeti-autoreset
+Vcs-Git: https://github.com/ggarciagrau/blue-yeti-autoreset.git
+Rules-Requires-Root: no
+
+Package: blue-yeti-autoreset
+Architecture: linux-any
+Depends: ${misc:Depends}, ${shlibs:Depends}, systemd
+Suggests: pulseaudio-utils, python3, python3-websocket
+Description: automatic recovery for Blue Yeti microphones that stop capturing
+ Some 2020-2023 Blue Yeti Classic microphones (USB 046d:0ab7, firmware 0.20)
+ stay detected by USB, ALSA and PipeWire after a reboot, resume or replug but
+ never deliver any audio. This package sends the same volatile firmware reset
+ that the official control software uses, automatically at boot, after
+ suspend/hibernate and whenever the microphone is plugged in.
+ .
+ It also ships an optional per-user helper, blue-yeti-obs-reconnect, that
+ makes OBS Studio pick the microphone up again after a reset.

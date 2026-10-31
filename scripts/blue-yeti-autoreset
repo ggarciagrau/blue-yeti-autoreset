@@ -4,8 +4,30 @@ set -eu
 
 reset_tool=${BLUE_YETI_RESET_TOOL:-/usr/bin/blue-yeti-reset}
 sysfs_root=${BLUE_YETI_SYSFS_ROOT:-/sys/bus/usb/devices}
+# A reset makes the microphone re-enumerate, which fires the hotplug rule again.
+# Skip any serial that was reset within this many seconds so the boot, resume
+# and hotplug triggers never reset the same microphone twice in a row.
+state_dir=${BLUE_YETI_STATE_DIR:-/run/blue-yeti-autoreset}
+debounce_seconds=${BLUE_YETI_DEBOUNCE_SECONDS:-60}
+settle_seconds=${BLUE_YETI_SETTLE_SECONDS:-0}
 found=0
 failed=0
+
+recently_reset()
+{
+    stamp=$1
+    [ -r "$stamp" ] || return 1
+    last=
+    IFS= read -r last < "$stamp" || return 1
+    case $last in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ $(( $(date +%s) - last )) -lt "$debounce_seconds" ]
+}
+
+if [ "$settle_seconds" != 0 ]; then
+    sleep "$settle_seconds"
+fi
 
 for device in "$sysfs_root"/*
 do
@@ -30,6 +52,15 @@ do
     fi
 
     found=1
+    stamp="$state_dir/$(printf '%s' "$serial" | tr -c 'A-Za-z0-9._-' '_')"
+    if recently_reset "$stamp"; then
+        printf '%s\n' "Blue Yeti $serial was reset less than ${debounce_seconds}s ago; skipping."
+        continue
+    fi
+    if mkdir -p "$state_dir" 2>/dev/null; then
+        date +%s > "$stamp" || :
+    fi
+
     if "$reset_tool" --execute-reset --serial "$serial"; then
         printf '%s\n' "Automatic Blue Yeti reset accepted for serial $serial."
     else

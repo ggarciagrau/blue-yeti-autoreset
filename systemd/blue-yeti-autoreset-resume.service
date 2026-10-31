@@ -6,6 +6,8 @@ After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate
 [Service]
 Type=oneshot
 ExecStart=/usr/lib/blue-yeti-autoreset/blue-yeti-autoreset
+RuntimeDirectory=blue-yeti-autoreset
+RuntimeDirectoryPreserve=yes
 TimeoutStartSec=30
 NoNewPrivileges=yes
 PrivateTmp=yes

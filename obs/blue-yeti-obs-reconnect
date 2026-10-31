@@ -1,0 +1,141 @@
+#!/usr/bin/python3 -I
+"""blue-yeti-obs-reconnect: reconnect OBS microphone inputs when the Blue Yeti reappears.
+
+After a USB reset or replug, OBS keeps its old capture stream and records gaps.
+This watches `pactl subscribe` for a new Yeti source and, once things settle,
+re-points every OBS PulseAudio input capture at the Yeti and back to its
+original device, which forces OBS to open a fresh stream.
+"""
+import base64
+import configparser
+import hashlib
+import json
+import os
+import select
+import subprocess
+import sys
+import time
+
+import websocket
+
+YETI = 'Blue_Microphones'
+SETTLE_SECONDS = 1
+MIN_INTERVAL_SECONDS = 10  # never reconnect OBS more often than this
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def yeti_source_entry():
+    """Return (index, name) of the Yeti capture source, or None."""
+    out = subprocess.run(['pactl', 'list', 'short', 'sources'],
+                         capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        fields = line.split('\t')
+        if len(fields) > 1 and YETI in fields[1] and fields[1].startswith('alsa_input.'):
+            return fields[0], fields[1]
+    return None
+
+
+def yeti_source():
+    entry = yeti_source_entry()
+    return entry[1] if entry else None
+
+
+# Native and Flatpak OBS; OBS 30 keeps the WebSocket settings in global.ini,
+# OBS 31+ in user.ini.
+OBS_CONFIG_DIRS = ('~/.config/obs-studio', '~/.var/app/com.obsproject.Studio/config/obs-studio')
+
+
+def obs_websocket_settings():
+    for config_dir in OBS_CONFIG_DIRS:
+        for ini in ('user.ini', 'global.ini'):
+            cfg = configparser.ConfigParser(strict=False, interpolation=None)
+            cfg.optionxform = str
+            try:
+                cfg.read(os.path.expanduser(f'{config_dir}/{ini}'))
+            except configparser.Error:
+                continue
+            if cfg.has_section('OBSWebSocket'):
+                return cfg['OBSWebSocket']
+    raise RuntimeError('OBS WebSocket settings not found; enable Tools > WebSocket Server Settings')
+
+
+def obs_connect():
+    c = obs_websocket_settings()
+    ws = websocket.create_connection(f"ws://localhost:{c.get('ServerPort', '4455')}", timeout=5)
+    hello = json.loads(ws.recv())['d']
+    ident = {'rpcVersion': 1}
+    if 'authentication' in hello:
+        a = hello['authentication']
+        secret = base64.b64encode(hashlib.sha256((c.get('ServerPassword', '') + a['salt']).encode()).digest()).decode()
+        ident['authentication'] = base64.b64encode(hashlib.sha256((secret + a['challenge']).encode()).digest()).decode()
+    ws.send(json.dumps({'op': 1, 'd': ident}))
+    ws.recv()
+    return ws
+
+
+def obs_req(ws, request_type, data=None):
+    ws.send(json.dumps({'op': 6, 'd': {'requestType': request_type, 'requestId': 'r', 'requestData': data or {}}}))
+    while True:
+        msg = json.loads(ws.recv())
+        if msg['op'] == 7:
+            return msg['d'].get('responseData') or {}
+
+
+def reconnect_obs():
+    """Return True if OBS inputs were reconnected."""
+    yeti = yeti_source()
+    if not yeti:
+        log('Yeti source not present; nothing to reconnect.')
+        return False
+    try:
+        ws = obs_connect()
+    except Exception as e:
+        log(f'OBS not reachable ({e}); skipping.')
+        return False
+    try:
+        for inp in obs_req(ws, 'GetInputList', {'inputKind': 'pulse_input_capture'}).get('inputs', []):
+            name = inp['inputName']
+            original = obs_req(ws, 'GetInputSettings', {'inputName': name}).get('inputSettings', {}).get('device_id', 'default')
+            if original not in ('default', yeti):
+                continue
+            obs_req(ws, 'SetInputSettings', {'inputName': name, 'inputSettings': {'device_id': 'yeti-reconnect-placeholder'}})
+            time.sleep(0.1)
+            obs_req(ws, 'SetInputSettings', {'inputName': name, 'inputSettings': {'device_id': original}})
+            log(f'Reconnected OBS input {name!r} ({original}).')
+    finally:
+        ws.close()
+    return True
+
+
+def main():
+    proc = subprocess.Popen(['pactl', 'subscribe'], stdout=subprocess.PIPE, text=True, bufsize=1)
+    deadline = None
+    last_reconnect = -MIN_INTERVAL_SECONDS
+    while True:
+        timeout = None if deadline is None else max(0.0, deadline - time.monotonic())
+        ready, _, _ = select.select([proc.stdout], [], [], timeout)
+        if ready:
+            line = proc.stdout.readline()
+            if not line:
+                sys.exit('pactl subscribe ended')
+            # Only a brand-new *source* (device) counts, e.g. "Event 'new' on source #171".
+            # OBS's own reconnects emit "'new' on source-output", which must be ignored.
+            words = line.split()
+            if len(words) == 5 and words[1] == "'new'" and words[3] == 'source':
+                entry = yeti_source_entry()
+                if entry and words[4] == f'#{entry[0]}':
+                    deadline = time.monotonic() + SETTLE_SECONDS
+        elif deadline is not None:
+            deadline = None
+            if time.monotonic() - last_reconnect < MIN_INTERVAL_SECONDS:
+                log('Reconnected recently; skipping.')
+                continue
+            if reconnect_obs():
+                last_reconnect = time.monotonic()
+
+
+if __name__ == '__main__':
+    main()

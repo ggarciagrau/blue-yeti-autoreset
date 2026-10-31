@@ -4,22 +4,22 @@
 detected normally by USB, ALSA, and PipeWire but stops delivering capture
 samples. Recording applications can open the microphone and ALSA can report a
 running 44.1 or 48 kHz stream while its hardware pointer remains at zero. The
-most visible symptom is no microphone capture after boot even though the Yeti
-remained connected and appears ready to use. The same fault can be reproduced
-by some logical USB hub power cycles. It cannot be repaired by restarting
-PipeWire, rebinding `snd-usb-audio`, or issuing a host USB reset.
+most visible symptoms are no microphone capture after boot, after resume, or
+after plugging the microphone back in, even though it appears ready to use.
+`arecord` fails with `Input/output error`. It cannot be repaired by restarting
+PipeWire, rebinding `snd-usb-audio`, or issuing a host USB reset. Windows is not
+affected because Logitech's software resets the microphone itself.
 
-The traditional workaround is to physically unplug and reconnect the Yeti, or
-otherwise remove USB power long enough to give it a complete power cycle. That
-works because the microphone performs its full cold-start initialization when
-power returns. This utility provides the equivalent recovery automatically,
-without requiring access to the cable after affected boots or system resumes.
+The traditional workaround is to physically unplug and reconnect the Yeti, often
+several times. This utility instead sends the same volatile ROM-reset command
+used by the official control software. The command resets the microphone's MCU
+and USB logic, causes a clean disconnect/re-enumeration, and restores capture
+without flashing firmware or writing persistent settings.
 
-The utility automatically recovers the microphone by sending the same volatile
-ROM-reset command used by the official control software. The command resets the
-microphone's MCU and USB logic, causes a clean
-disconnect/re-enumeration, and restores capture without flashing firmware or
-writing persistent settings.
+> This is a fork of [lbrooney/blue-yeti-autoreset](https://github.com/lbrooney/blue-yeti-autoreset)
+> that adds a reset whenever the microphone is plugged in, a guard against
+> repeated resets, an optional OBS Studio helper, and `.deb` packages for
+> Ubuntu. The reset tool itself is unchanged.
 
 ## Supported device
 
@@ -28,95 +28,105 @@ writing persistent settings.
 - USB Audio Class: UAC1
 - Known affected production era: 2020-2023
 
-At boot and after system resume, the services accept any serial number for that
-exact device and firmware. They read each matching serial from sysfs, and the
-reset binary checks the device identity and serial again before the request is
-sent.
-
-This utility is intended for 2020-2023-era Blue Yeti Classic CR units using this
-hardware and firmware. Blue reused the Yeti name across revisions, so the year
-or enclosure alone is not a compatibility check; the USB ID and firmware value
-above are authoritative.
-
-## Install on Arch Linux
-
-Install the `blue-yeti-autoreset` package from the AUR with an AUR helper:
+Check yours with:
 
 ```sh
-yay -S blue-yeti-autoreset
+lsusb -v -d 046d:0ab7 2>/dev/null | grep bcdDevice   # expect: bcdDevice 0.20
 ```
 
-For development installs from this checkout:
+The services accept any serial number for that exact device and firmware. They
+read each matching serial from sysfs, and the reset binary checks the device
+identity and serial again before the request is sent. Blue reused the Yeti name
+across revisions, so the year or enclosure alone is not a compatibility check;
+the USB ID and firmware value above are authoritative.
+
+## Install on Ubuntu / Debian
+
+Download the package for your machine from the
+[latest release](https://github.com/ggarciagrau/blue-yeti-autoreset/releases/latest)
+and install it with `apt`:
+
+```sh
+version=0.3.0.1
+arch=$(dpkg --print-architecture)   # amd64 or arm64
+wget "https://github.com/ggarciagrau/blue-yeti-autoreset/releases/download/v$version/blue-yeti-autoreset_${version}_${arch}.deb"
+sudo apt install "./blue-yeti-autoreset_${version}_${arch}.deb"
+```
+
+That is all. The package enables the boot and resume resets and installs the
+udev rule that resets the microphone whenever it is plugged in. Installing does
+not reset a microphone that is already connected; unplug and reconnect it once,
+or reboot, to apply the fix right away.
+
+Packages are built from this repository by GitHub Actions, published with a
+`SHA256SUMS` file and a build-provenance attestation. To verify a download:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify "blue-yeti-autoreset_${version}_${arch}.deb" --repo ggarciagrau/blue-yeti-autoreset
+```
+
+Built and tested on Ubuntu 24.04 LTS.
+
+## Install from source (any distribution)
+
+Dependencies: make, libusb 1.0 (with headers), pkgconf, a C17 compiler,
+systemd, udev, and POSIX `sh`. On Ubuntu:
+`sudo apt install build-essential pkgconf libusb-1.0-0-dev`.
 
 ```sh
 make check
 sudo make install
 sudo systemctl daemon-reload
-sudo systemctl enable --now blue-yeti-autoreset.service
-sudo systemctl enable blue-yeti-autoreset-resume.service
-```
-
-`make install` respects `DESTDIR` for staged/packaged builds (e.g.
-`make DESTDIR=/tmp/pkgroot install`). Build-time dependencies (make, libusb,
-pkgconf, a C17 compiler, systemd, and POSIX `sh`) are listed again under
-[Build and test](#build-and-test).
-
-The installation provides two systemd services that must each be enabled once:
-
-- `blue-yeti-autoreset.service` runs once during each boot after initial udev
-  device processing has settled. USB reconnections later in the same boot do
-  not trigger another automatic reset.
-- `blue-yeti-autoreset-resume.service` runs once after the system resumes from
-  suspend, hibernate, hybrid-sleep, or suspend-then-hibernate, since the same
-  fault reappears whenever the microphone stays powered across one of those
-  transitions. It is a separate unit, ordered `After=` the corresponding sleep
-  targets and pulled in by `WantedBy=` those same targets, so systemd starts it
-  every time the machine wakes rather than only once per boot.
-
-After upgrading from a version that only reset at boot, enable
-`blue-yeti-autoreset-resume.service` as well; upgrades do not enable it
-automatically.
-
-To enable automatic recovery starting with the next boot/resume without
-resetting an already connected microphone immediately:
-
-```sh
+sudo udevadm control --reload
 sudo systemctl enable blue-yeti-autoreset.service blue-yeti-autoreset-resume.service
 ```
 
-## Uninstall
+`make install` respects `DESTDIR` for staged/packaged builds (e.g.
+`make DESTDIR=/tmp/pkgroot install`).
 
-Disable and stop both services, then remove the AUR package:
+## OBS Studio helper (optional)
 
-```sh
-sudo systemctl disable --now blue-yeti-autoreset.service blue-yeti-autoreset-resume.service
-sudo pacman -R blue-yeti-autoreset
-```
+After a reset or a replug the microphone briefly disappears. OBS keeps its old
+capture stream and records silence or dropouts until the input is reopened.
+`blue-yeti-obs-reconnect` is a small per-user service that watches for the Yeti
+to reappear and makes OBS reopen every microphone input that uses the Yeti or
+the default device, about a second later.
 
-For development installs, remove the installed files from this checkout
-instead:
+It talks to OBS through its built-in WebSocket server and reads the port and
+password from your OBS configuration, so nothing needs to be configured:
 
-```sh
-sudo systemctl disable --now blue-yeti-autoreset.service blue-yeti-autoreset-resume.service
-sudo make uninstall
-sudo systemctl daemon-reload
-```
+1. In OBS, open **Tools → WebSocket Server Settings** and enable the server.
+2. Install the helper's dependencies and enable it for your user:
 
-`make uninstall` removes `blue-yeti-reset`, the `blue-yeti-autoreset` wrapper,
-both systemd unit files, and the installed README/LICENSE copies, using the
-same `DESTDIR` (if any) that was passed to `make install`.
+   ```sh
+   sudo apt install python3-websocket pulseaudio-utils
+   systemctl --user enable --now blue-yeti-obs-reconnect.service
+   ```
+
+For the smoothest result, select the Yeti itself as the device of your OBS
+microphone inputs instead of "Default", so OBS never falls back to another
+microphone while the Yeti reconnects.
+
+Logs: `journalctl --user -u blue-yeti-obs-reconnect`.
 
 ## How it works
 
-1. `blue-yeti-autoreset.service` starts once during boot after initial udev
-   processing has settled. `blue-yeti-autoreset-resume.service` starts once
-   after every return from suspend, hibernate, hybrid-sleep, or
-   suspend-then-hibernate, because the microphone stays powered across those
-   transitions the same way it does across a warm boot and can end up in the
-   same stuck state.
-2. Either unit's wrapper scans sysfs for every device with the supported VID,
-   PID, firmware version, and a non-empty serial, then invokes
-   `blue-yeti-reset` for each serial.
+1. Three triggers run the same wrapper:
+   - `blue-yeti-autoreset-hotplug.service`, started by
+     `60-blue-yeti-autoreset.rules` every time the microphone is plugged in,
+     including the coldplug event for a microphone that is connected at boot;
+   - `blue-yeti-autoreset.service`, once per boot after initial udev processing
+     has settled;
+   - `blue-yeti-autoreset-resume.service`, after every return from suspend,
+     hibernate, hybrid-sleep, or suspend-then-hibernate, because the microphone
+     stays powered across those transitions and can end up in the same state.
+2. The wrapper scans sysfs for every device with the supported VID, PID,
+   firmware version, and a non-empty serial. It skips any microphone it reset
+   less than 60 seconds ago (state in `/run/blue-yeti-autoreset`), so the
+   re-enumeration caused by the reset, or two triggers firing together, never
+   reset the same microphone twice. It then invokes `blue-yeti-reset` for each
+   remaining serial.
 3. The binary verifies VID, PID, firmware version, and serial, temporarily
    detaches AudioControl interface 0, and claims it through libusb.
 4. It sends one fixed extension-unit `SET_CUR` request:
@@ -130,11 +140,8 @@ wLength       = 8
 payload       = 00 09 00 00 00 00 00 00
 ```
 
-5. The firmware resets and the microphone re-enumerates. No hotplug rule
-   starts either service again mid-boot or mid-session; `RemainAfterExit`
-   keeps `blue-yeti-autoreset.service` active for the rest of the boot, and
-   `blue-yeti-autoreset-resume.service` simply goes back to `inactive` until
-   the next sleep/resume cycle pulls it in again.
+5. The firmware resets and the microphone re-enumerates about two seconds
+   later, working.
 
 ## Manual recovery
 
@@ -145,7 +152,14 @@ USB:
 blue-yeti-reset
 ```
 
-An intentional live reset requires both the action flag and device serial:
+To reset every supported microphone now (respecting the 60-second guard):
+
+```sh
+sudo systemctl start blue-yeti-autoreset-hotplug.service
+```
+
+Or reset one microphone directly, which requires both the action flag and its
+serial:
 
 ```sh
 sudo blue-yeti-reset --execute-reset --serial SERIAL
@@ -153,32 +167,34 @@ sudo blue-yeti-reset --execute-reset --serial SERIAL
 
 There is no option to select another opcode or supply an arbitrary payload.
 
-Manual recovery is a fallback, not the recommended fix for suspend/hibernate:
-enable `blue-yeti-autoreset-resume.service` (see Install) so the reset runs
-automatically on every wake instead. Applications can keep recording while a
-reset runs; see [Limitations](#limitations) for how they react.
-
 ## Logs
 
-Inspect the service state and this boot's recovery logs:
-
 ```sh
-systemctl status blue-yeti-autoreset.service
+journalctl -b -u blue-yeti-autoreset-hotplug.service
 journalctl -b -u blue-yeti-autoreset.service
-```
-
-Recovery logs from suspend/hibernate resumes are under the resume unit, still
-within the current boot's journal:
-
-```sh
-systemctl status blue-yeti-autoreset-resume.service
 journalctl -b -u blue-yeti-autoreset-resume.service
 ```
 
-## Build and test
+## Uninstall
 
-Development dependencies are make, libusb, pkgconf, a C17 compiler, systemd,
-and POSIX `sh`.
+Package install:
+
+```sh
+systemctl --user disable --now blue-yeti-obs-reconnect.service   # if enabled
+sudo apt remove blue-yeti-autoreset
+```
+
+Source install, from this checkout:
+
+```sh
+systemctl --user disable --now blue-yeti-obs-reconnect.service   # if enabled
+sudo systemctl disable --now blue-yeti-autoreset.service blue-yeti-autoreset-resume.service
+sudo make uninstall
+sudo systemctl daemon-reload
+sudo udevadm control --reload
+```
+
+## Build and test
 
 ```sh
 make
@@ -186,23 +202,36 @@ make check
 ```
 
 `make check` builds with strict warnings, verifies plan-only mode, checks shell
-syntax and automatic device discovery, and validates both systemd units. It
-never sends a live USB request.
+and Python syntax, tests device discovery and the reset guard, validates all
+systemd units and the udev rule, and never sends a live USB request.
+
+To build the Debian package locally:
+
+```sh
+sudo apt install devscripts equivs
+sudo mk-build-deps --install --remove debian/control
+dpkg-buildpackage -us -uc -b
+```
+
+To publish a release, update `debian/changelog` (`dch -v X.Y.Z.W`), commit, and
+push a matching `vX.Y.Z.W` tag; GitHub Actions builds the amd64 and arm64
+packages and attaches them to a new release.
 
 ## Limitations
 
-- Recovery is proactive once at boot and once per suspend/hibernate resume
-  (when `blue-yeti-autoreset-resume.service` is enabled); it does not react to
-  later USB reconnections within an otherwise-awake session, continuously
-  sample audio, or diagnose unrelated capture failures.
 - A reset briefly removes and recreates the ALSA and PipeWire devices, the same
-  as unplugging the microphone. PipeWire re-adds it about three seconds later,
-  and clients that follow it, such as EasyEffects, resume capture on their own.
-  Applications that open the ALSA device directly see it disappear and must
-  reopen it. The microphone does not need to be unplugged afterwards.
+  as unplugging the microphone. PipeWire re-adds it about two seconds later.
+  Clients that follow the default device resume capture on their own;
+  applications that keep a stream open, such as OBS, must reopen it (see the OBS
+  helper above).
+- A replug resets the microphone once more about a second later, so it
+  disconnects and reconnects one extra time before it stays connected.
+- The automatic triggers do not continuously sample audio. If the microphone
+  stops capturing in the middle of a session without being replugged, run a
+  manual reset.
 - Firmware versions other than `0.20` are intentionally rejected because their
   reset handlers have not been verified.
-- Automatic recovery requires systemd.
+- Automatic recovery requires systemd and udev.
 
 ## Cause of the bug
 
@@ -216,6 +245,13 @@ advances. Firmware opcode `0x09` resets the MCU and that deeper device state, as
 a full USB power cycle does. The exact surviving ADC, PLL, clock, codec, or
 stream-engine state has not yet been isolated.
 
+## Credits
+
+The reset tool, the analysis of the firmware fault and the boot and resume
+services are by [Liam Rooney](https://github.com/lbrooney/blue-yeti-autoreset).
+This fork adds the hotplug trigger, the reset guard, the OBS helper and the
+Debian packaging.
+
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
