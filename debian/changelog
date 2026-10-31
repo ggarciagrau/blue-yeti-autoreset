@@ -1,0 +1,12 @@
+blue-yeti-autoreset (0.3.0.1) noble; urgency=medium
+
+  * Based on upstream lbrooney/blue-yeti-autoreset 0.3.0.
+  * Reset the microphone whenever it is plugged in, through a udev rule and
+    blue-yeti-autoreset-hotplug.service.
+  * Skip microphones reset in the last 60 seconds, so the re-enumeration
+    caused by a reset, and overlapping boot/resume/hotplug triggers, never
+    reset the same microphone twice in a row.
+  * Add the optional per-user blue-yeti-obs-reconnect helper for OBS Studio.
+  * Add Debian packaging and GitHub release builds for Ubuntu.
+
+ -- Gerard Garcia Grau <gerardgarciagrau2@gmail.com>  Sat, 31 Oct 2026 23:58:04 +0100
