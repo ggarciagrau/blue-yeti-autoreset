@@ -37,9 +37,10 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends devscripts equivs lintian
-          sudo mk-build-deps --install --remove \
-            --tool 'apt-get -y --no-install-recommends' debian/control
+          sudo apt-get install -y --no-install-recommends \
+            debhelper libusb-1.0-0-dev pkgconf python3 systemd systemd-dev udev lintian
+          # Fails if the list above has drifted from debian/control.
+          dpkg-checkbuilddeps
 
       - name: Build package (runs make check)
         run: dpkg-buildpackage -us -uc -b
